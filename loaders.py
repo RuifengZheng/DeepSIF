@@ -1,3 +1,4 @@
+import torch
 from torch.utils.data import Dataset
 import numpy as np
 from scipy.io import loadmat, savemat
@@ -5,7 +6,9 @@ import h5py
 from utils import add_white_noise, ispadding
 import random
 import mne
-
+import os
+from tqdm import tqdm
+import scipy.io as scio
 
 class SpikeEEGBuild(Dataset):
 
@@ -44,9 +47,9 @@ class SpikeEEGBuild(Dataset):
         self.fwd = fwd
         self.transform = transform
 
-        self.data = []
+        # self.data = []
         self.dataset_meta = loadmat(self.file_path)
-        if 'dataset_len' in args_params:
+        if 'dataset_len' in args_params and False:
             self.dataset_len = args_params['dataset_len']
         else:   # use the whole dataset
             self.dataset_len = self.dataset_meta['selected_region'].shape[0]
@@ -54,21 +57,70 @@ class SpikeEEGBuild(Dataset):
             self.num_scale_ratio = args_params['num_scale_ratio']
         else:
             self.num_scale_ratio = self.dataset_meta['scale_ratio'].shape[2]
+        # if not self.data:
+        self.region_not_empty=self.dataset_meta['not_empty_region']
+        path = "/home/zhongying/research/repo/DeepSIF-main/source/nmm_region998_1"
+        region_num = 994
+        self_data = []
+        for i in range(region_num):
+            self_data.append([])
+        for i in tqdm(range(region_num)):
+            nmm_list = os.listdir(os.path.join(path, 'a%d' % i))
+            if len(nmm_list) > 0:
+                for index, file in enumerate(nmm_list):
+                    if index > len(nmm_list):
+                        break
+                    mat = scio.loadmat(os.path.join(path, 'a%d' % i, file))['data']
+                    self_data[i].append(mat)
+        self.data=self_data
+        # self.data = torch.load(
+        #     "/home/zhongying/research/repo/DeepSIF-main/Auxiliary script/self_data1.pt")  # h5py.File('{}_nmm.h5'.format(self.file_path[:-12]), 'r')['data']
 
     def __getitem__(self, index):
 
-        if not self.data:
-            self.data = h5py.File('{}_nmm.h5'.format(self.file_path[:-12]), 'r')['data']
-
+        nper=2
         raw_lb = self.dataset_meta['selected_region'][index].astype(np.int)         # labels with padding
         lb = raw_lb[np.logical_not(ispadding(raw_lb))]                              # labels without padding
         raw_nmm = np.zeros((500, self.fwd.shape[1]))
 
         for kk in range(raw_lb.shape[0]):                                           # iterate through number of sources
             curr_lb = raw_lb[kk, np.logical_not(ispadding(raw_lb[kk]))]
-            current_nmm = self.data[self.dataset_meta['nmm_idx'][index][kk]]
+            # empty_lb=[]
+            # for lb in curr_lb:
+            #     seg_num = self.data[lb].__len__()
+            #     if seg_num == 0:
+            #         empty_lb.append(lb)
+            # curr_lb=np.setdiff1d(curr_lb, empty_lb)
 
-            ssig = current_nmm[:, [curr_lb[0]]]                                     # waveform in the center region
+            nmm_idx_orig=self.dataset_meta['nmm_idx'][index][kk]
+            region= self.dataset_meta['not_empty_region'][index][kk]      # region=(nmm_idx_orig-1)//nper-1
+            segment=(nmm_idx_orig-1)%nper
+            try:
+                current_nmm = self.data[region][segment]
+            except:
+                print('calei')
+            # region=curr_lb[0]
+            # neibour_index=0
+            # seg_num=self.data[region].__len__()
+            #
+            # if seg_num>segment:
+            #     current_nmm=self.data[region][segment]
+            # else:
+            # for neibour_index, neibour in  enumerate(curr_lb):
+            #     neibour_seg_num=self.data[neibour].__len__()
+            #     if neibour_seg_num>segment:
+            #         current_nmm = self.data[neibour][segment]
+            #         region=neibour
+            #         break
+
+            # current_nmm = self.data[self.dataset_meta['nmm_idx'][index][kk]] origin
+
+            # # added by ZRF
+            # current_nmm=current_nmm[random.randint(0,current_nmm.__len__()-1
+            ssig = current_nmm[:, region]                                     # waveform in the center region
+            #-----mag_change,scale_ratio are calculated here
+
+            #-----
             # set source space SNR
             ssig = ssig / np.max(ssig) * self.dataset_meta['scale_ratio'][index][kk][random.randint(0, self.num_scale_ratio - 1)]
             current_nmm[:, curr_lb] = ssig.reshape(-1, 1)
@@ -80,7 +132,7 @@ class SpikeEEGBuild(Dataset):
             raw_nmm = raw_nmm + current_nmm
 
         eeg = np.matmul(self.fwd, raw_nmm.transpose())                              # project data to sensor space; num_electrode * num_time
-        csnr = self.dataset_meta['sensor_snr'][index]
+        csnr = self.dataset_meta['current_snr'][index]
         noisy_eeg = add_white_noise(eeg, csnr).transpose()
 
         noisy_eeg = noisy_eeg - np.mean(noisy_eeg, axis=0, keepdims=True)  # time
