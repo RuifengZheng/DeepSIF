@@ -121,7 +121,7 @@ selected_region = permute(selected_region,[1,3,2]);
 selected_region = reshape(repmat(selected_region, 4, 1, 1), MAX_SIZE, n_sources, []);  % 4 SNR levels
 selected_region = permute(selected_region,[3,2,1]);
 %% SAVE
-dataset_name = 'source_nper2_debug';
+dataset_name = 'source1';
 save([ds_type '_sample_' dataset_name '.mat'], 'selected_region')
 %% ========================================================================
 %=============== Generate Other Parameters=================================
