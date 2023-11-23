@@ -1,6 +1,5 @@
 function process_raw_nmm(filename, varargin)
 % Scan through the raw NMM data to find the spike data
-
 % %%%%%%%%%%%%%% SETUP PARAMETERS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 p = inputParser;
 addRequired(p,'filename',@ischar);
@@ -10,10 +9,11 @@ filename = p.Results.filename;
 headmodel = load(['../anatomy/' p.Results.leadfield_name]);
 fwd = headmodel.fwd;
 savefile_path = '../source/';
-
+%ZRF
+region_number=998;
 % -------------------------------------------------------------------------
-iter_list = 1:5;   % the iter during NMM generation.
-previous_iter_spike_num = zeros(1, 994);
+iter_list = 0:2;   % the iter during NMM generation.
+previous_iter_spike_num = zeros(1, region_number);
 for i_iter = 1:length(iter_list)
     iter = iter_list(i_iter);
     if isempty(dir([savefile_path 'nmm_' filename '/clip_info/iter' int2str(iter)]))
@@ -26,53 +26,60 @@ for i_iter = 1:length(iter_list)
     for i = 1:length(done)
         finished_regions(i) = str2num(done(i).name(10:end-3));
     end
-    remaining_regions = setdiff(1:994, finished_regions+1);
+    remaining_regions = setdiff(1:region_number, finished_regions+1);
     if isempty(remaining_regions)
         continue;
     end
 
     % -------- start the main progress -----------------------------------%
-    for ii = 183:183%length(remaining_regions)
+    for ii = 1:24%length(remaining_regions)
 
         i = remaining_regions(ii);
         % creat folders to save nmm files
         if isempty(dir([savefile_path 'nmm_' filename '/a' int2str(i-1)]))
             mkdir([savefile_path 'nmm_' filename '/a' int2str(i-1)])
         end
-
-        fn = [savefile_path 'raw_nmm/a' int2str(i-1) '/mean_iter_' int2str(iter) '_a_iter_' int2str(i-1)];
-        raw_data = load([fn '_ds.mat']);
-        nmm = raw_data.all_data;
-        % nmm = downsample(nmm, 4);
-        [spike_time, spike_chan] = find_spike_time(nmm);                   % Process raw tvb output to find the spike peak time
-        
-        % ----------- select the spikes we want to extract ---------------%
-        rule1 =  (spike_chan == i);                                        % there is spike in the source region
-        start_time = floor(spike_time(rule1)/500) * 500 + 1;               % there is no source in other region in the clip
-        clear_ind = repmat(start_time, [900, 1]) + (-200:699)';            % 900 * num_spike
-        rule2 = (sum(ismember(clear_ind, spike_time(~rule1)), 1) == 0);    % there are no other spikes in the clip
-        spike_time = spike_time(rule1);
-        spike_time = spike_time(rule2);
-               
-        % ----------- Optional :  Scale the NMM here----------------------%
-        alpha_value = find_alpha(nmm, fwd, i, spike_time, 15);
-        nmm = rescale_nmm_channel(nmm, i, spike_time, alpha_value);       
-        % ------------Save Spike NMM Data --------------------------------%
-        start_time = floor(spike_time/500) * 500 + 1;
-        spike_ind = repmat(start_time, [500, 1]) + (0:499)';       
-%         start_time = floor((spike_time+200)/500) * 500 + 1 - 200;        % start time can be changed
-%         start_time = max(start_time, 101);
-%         spike_ind = repmat(start_time, [500, 1]) + (0:499)';
-
-        nmm_data = reshape(nmm(spike_ind,:), 500, [], size(nmm,2));        % size: time * num_spike * channel
-        save_spikes_(nmm_data, [savefile_path 'nmm_' filename '/a' int2str(i-1) '/nmm_'], previous_iter_spike_num(i));
-        previous_iter_spike_num(i) = previous_iter_spike_num(i) + length(spike_time);
-        % Save something in clip info, so that we can make sure we finish this process
-        save_struct = struct();
-        save_struct.num_spike = previous_iter_spike_num(i);
-        save_struct.spike_time = spike_time;
-        parsave([savefile_path 'nmm_' filename '/clip_info/iter' int2str(iter) '/iter_' int2str(iter) '_i_' int2str(i-1) '.mat'], save_struct)
-        sprintf(['iter_' int2str(iter) '_i_%d is done\n'], i-1)
+        for s=0:9
+            fn = [savefile_path 'raw_nmm_998_1/a' int2str(i-1) '/mean_iter_' int2str(iter) '_a_iter_' int2str(i-1)];
+            raw_data = load([fn '_' int2str(s) '.mat']);
+            nmm = raw_data.data;
+            % nmm = downsample(nmm, 4);
+            [spike_time, spike_chan] = find_spike_time(nmm);                   % Process raw tvb output to find the spike peak time
+            
+            % ----------- select the spikes we want to extract ---------------%
+            rule1 =  (spike_chan == i);                                        % there is spike in the source region
+            start_time = floor(spike_time(rule1)/500) * 500 + 1;               % there is no source in other region in the clip
+            if length(start_time)==0
+                continue;
+            end
+            clear_ind = repmat(start_time, [900, 1]) + (-200:699)';            % 900 * num_spike
+            rule2 = (sum(ismember(clear_ind, spike_time(~rule1)), 1) == 0);    % there are no other spikes in the clip
+            spike_time = spike_time(rule1);
+            spike_time = spike_time(rule2);
+            %----------add by ZRF
+            if length(spike_time)==0
+                continue;
+            end
+            % ----------- Optional :  Scale the NMM here----------------------%
+            alpha_value = find_alpha(nmm, fwd, i, spike_time, 15);
+            nmm = rescale_nmm_channel(nmm, i, spike_time, alpha_value);       
+            % ------------Save Spike NMM Data --------------------------------%
+            start_time = floor(spike_time/500) * 500 + 1;
+            spike_ind = repmat(start_time, [500, 1]) + (0:499)';       
+    %         start_time = floor((spike_time+200)/500) * 500 + 1 - 200;        % start time can be changed
+    %         start_time = max(start_time, 101);
+    %         spike_ind = repmat(start_time, [500, 1]) + (0:499)';
+    
+            nmm_data = reshape(nmm(spike_ind,:), 500, [], size(nmm,2));        % size: time * num_spike * channel
+            save_spikes_(nmm_data, [savefile_path 'nmm_' filename '/a' int2str(i-1) '/nmm_'], previous_iter_spike_num(i));
+            previous_iter_spike_num(i) = previous_iter_spike_num(i) + length(spike_time);
+            % Save something in clip info, so that we can make sure we finish this process
+            save_struct = struct();
+            save_struct.num_spike = previous_iter_spike_num(i);
+            save_struct.spike_time = spike_time;
+            parsave([savefile_path 'nmm_' filename '/clip_info/iter' int2str(iter) '/iter_' int2str(iter) '_i_' int2str(i-1) '_s' int2str(s) '.mat'], save_struct)
+            sprintf(['iter_' int2str(iter) '_i_%d is done\n'], i-1)
+        end
     end % END REGION
 end % END ITER
 end % ENG FUNCTION
@@ -135,8 +142,11 @@ function [alpha] = find_alpha(nmm, fwd, region_id, time_spike, target_SNR)
 %     - spike_time : the spike peak time in the (downsampled) NMM data
 %     - spike_chan : the spike channel for each spike
 %     - alpha      : the scaling factor for one patch source
-
+    try
     spike_ind = repmat(time_spike, [200, 1]) + (-99:100)';
+    catch
+        spike_ind = repmat(time_spike, [200, 1]) + (-99:100)';
+    end
     spike_ind = min(max(spike_ind(:),0), size(nmm,1));                     % make sure the index is not out of range
 %     spike_ind = max(0, time_spike-100): max(time_spike+100,size(nmm,1));   % make sure the index is not out of range                     
     spike_shape = nmm(:,region_id(1)); %/max(nmm(:,region_id(1)));
