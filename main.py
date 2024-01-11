@@ -5,14 +5,15 @@ from scipy.io import loadmat, savemat
 import numpy as np
 import logging
 import datetime
-
+import h5py
 import torch
 from torch import optim
 from torch.utils.data import DataLoader
-
+import pickle
 import network
 import loaders
-
+from tqdm import tqdm
+import scipy.io as scio
 
 def main():
     start_time = time.time()
@@ -24,9 +25,9 @@ def main():
     parser.add_argument('--device', default='cuda:0', type=str, help='device running the code')
     parser.add_argument('--arch', default='TemporalInverseNet', type=str, help='network achitecture class')
     parser.add_argument('--dat', default='SpikeEEGBuild', type=str, help='data loader')
-    parser.add_argument('--train', default='test_sample_source2.mat', type=str, help='train dataset name or directory')
-    parser.add_argument('--test', default='test_sample_source2.mat', type=str, help='test dataset name or directory')
-    parser.add_argument('--model_id', default=75, type=int, help='model id')
+    parser.add_argument('--train', default='train_sample_source_nper0108_debug.mat', type=str, help='train dataset name or directory')
+    parser.add_argument('--test', default='test_sample_source_nper0108_debug.mat', type=str, help='test dataset name or directory')
+    parser.add_argument('--model_id', default=7, type=int, help='model id')
     parser.add_argument('--lr', default=3e-4, type=float, help='learning rate')
     parser.add_argument('--resume', default='1', type=str, help='epoch id to resume')
     parser.add_argument('--epoch', default=20, type=int, help='total number of epoch')
@@ -57,12 +58,32 @@ def main():
     for v in args.__dict__:
         if v not in ['workers', 'train', 'test']:
             logger.info('{} is {}'.format(v, args.__dict__[v]))
-
+    #=============================================
+    path = "/home/zhongying/research/repo/DeepSIF-main/source/nmm_spikes"
+    # region_num = 994
+    # # region_num =2
+    nper_test=10
+    nper_train=100
+    self_data = []
+    # for i in range(region_num):
+    #     self_data.append([])
+    # for i in tqdm(range(region_num)):
+    #     nmm_list = os.listdir(os.path.join(path, 'a%d' % i))
+    #     if len(nmm_list) > 0:
+    #         for index, file in enumerate(nmm_list):
+    #             if index >= nper_train:
+    #                 break
+    #             mat = scio.loadmat(os.path.join(path, 'a%d' % i, file))['data']
+    #             self_data[i].append(mat)
+    # with open("spike_list","wb") as f:
+    #     pickle.dump(self_data,f)
+    # with open("spike_list","rb") as f:
+    #     self_data=pickle.load(f)
     # ================================== LOAD DATA ===================================================================================================
-    train_data = loaders.__dict__[args.dat](data_root + args.train, fwd=fwd,
-                                                args_params={'dataset_len': 4})
+    train_data = loaders.__dict__[args.dat](data_root + args.train, nper=nper_train, fwd=fwd,
+                                                args_params={'dataset_len': 4}, data=self_data)
     train_loader = DataLoader(train_data, batch_size=args.batch_size, num_workers=args.workers, pin_memory=True, shuffle=True)
-    test_data = loaders.__dict__[args.dat](data_root + args.test, fwd=fwd, args_params={'dataset_len': 4})
+    test_data = loaders.__dict__[args.dat](data_root + args.test, nper=nper_test, fwd=fwd, args_params={'dataset_len': 4}, data=self_data)
     test_loader = DataLoader(test_data, batch_size=args.batch_size, num_workers=args.workers, pin_memory=True, shuffle=False)
 
     # ================================== CREATE MODEL ================================================================================================
@@ -108,7 +129,7 @@ def main():
     print('Prepare time:', time.time() - start_time)
 
     # =============================== TRAINING =======================================================================================================
-    for epoch in range(args.start_epoch + 1, args.epoch):
+    for epoch in tqdm(range(args.start_epoch + 1, args.epoch)):
 
         # train for one epoch
         train_lss_all = train(train_loader, net, criterion, optimizer, {'device': device, 'logger': logger})
@@ -150,7 +171,7 @@ def train(train_loader, model, criterion, optimizer, args_params):
     model.train()
     train_loss = []
     start_time = time.time()
-    for batch_idx, sample_batch in enumerate(train_loader):
+    for batch_idx, sample_batch in enumerate(tqdm(train_loader)):
         # load data
         data = sample_batch['data'].to(device)
         nmm = sample_batch['nmm'].to(device)
@@ -179,7 +200,7 @@ def validate(val_loader, model, criterion, args_params):
     model.eval()
     val_loss = []
     with torch.no_grad():
-        for batch_idx, sample_batch in enumerate(val_loader):
+        for batch_idx, sample_batch in enumerate(tqdm(val_loader)):
             data = sample_batch['data'].to(device)
             nmm = sample_batch['nmm'].to(device)
             model_output = model(data)
@@ -193,4 +214,3 @@ def validate(val_loader, model, criterion, args_params):
 
 if __name__ == '__main__':
     main()
-
