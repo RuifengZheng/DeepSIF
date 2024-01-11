@@ -4,25 +4,25 @@ n_sources = 2;
 load('../anatomy/fs_cortex_20k_inflated.mat')
 load('../anatomy/fs_cortex_20k.mat')
 load('../anatomy/fs_cortex_20k_region_mapping.mat');
-%added by zrf
 load('../anatomy/dis_matrix_fs_20k.mat');
-all_dis=raw_dis_matrix;
 % when load mat in python, python cannot read nan properly, so use a magic number to represent nan when saving
 NAN_NUMBER = 15213; 
 MAX_SIZE = 70;
 if train
     nper = 100;                                                            % Number of nmm spike samples 
     n_data = 40;
-    n_iter = 48;                                                           % The number of variations in each source center
+    n_iter = 20;                                                           % The number of variations in each source center
     ds_type = 'train';
 else
-    nper = 2;
+    nper = 10;
     n_data = 1;
     n_iter = 3;
+    n_iter_test=20;
     ds_type = 'test';
 end
 %------------added by ZRF
 region_number=994;
+dataset_name = 'source_nper0108_debug';
 %% ========================================================================
 %=============== Generate Source Patch ====================================
 %% ======== Region Growing Get Candidate Source Regions ===================
@@ -102,12 +102,12 @@ n_iter_list(n_iter+1,:) = 1:region_number;
 %% ======== Build Source Patch ============================================
 for kk = 1:n_iter
     for ii  = 1:region_number
-        idx = region_number*(kk-1) + ii;
-        tr = selected_region_all{ii};
-        if kk <= size(tr, 1) && train
-            selected_region(idx,1,:) = tr(kk,:); %assign values to 1st source
-        else
-            selected_region(idx,1,:) = tr(randi([1,size(tr,1)],1,1),:);%% selected_region(idx,1,:) = tr(randi([n_iter+1,size(tr,1)],1,1),:); By ZRF, better editted to be more rigorous
+		idx = 994*(kk-1) + ii;
+        tr = selected_region_all{ii};			 
+        if kk <= size(tr, 1) && train																							
+            selected_region(idx,1,:) = tr(kk,:);																			   			   
+        else										  																
+            selected_region(idx,1,:) = tr(randi([1,size(tr,1)],1,1),:);																						   																			  			   																															   
         end
         for k=2:n_sources
             tr = selected_region_all{n_iter_list(kk+n_iter*(k-2),ii)};
@@ -121,14 +121,25 @@ selected_region = permute(selected_region,[1,3,2]);
 selected_region = reshape(repmat(selected_region, 4, 1, 1), MAX_SIZE, n_sources, []);  % 4 SNR levels
 selected_region = permute(selected_region,[3,2,1]);
 %% SAVE
-dataset_name = 'source1';
+
 save([ds_type '_sample_' dataset_name '.mat'], 'selected_region')
 %% ========================================================================
 %=============== Generate Other Parameters=================================
 %% NMM Signal Waveform
-random_samples = randi([0,nper-1],region_number*n_iter*4,n_sources);                 % the waveform index for each source
-nmm_idx = (selected_region(:,:,1)+1)*nper + random_samples + 1; 
-save([ds_type '_sample_' dataset_name '.mat'],'nmm_idx', 'random_samples',  '-append')
+random_samples = zeros(994,n_iter*4,n_sources);                        % the waveform index for each source
+for i=1:994
+    dirList=dir(['../source/nmm_spikes/a' int2str(i-1)]);
+    nmm_number=length(dirList)-2;
+    if nmm_number>0
+        if nper<nmm_number
+            nmm_number=nper;
+        end
+        random_samples(i,:,:)=randi([1,nmm_number],n_iter*4,n_sources);
+    end
+end
+random_samples=reshape(random_samples,994*n_iter*4,n_sources); 
+% nmm_idx = (selected_region(:,:,1)+1)*nper + random_samples + 1; 
+% save(['../source/' ds_type '_sample_' dataset_name '.mat'],'nmm_idx', 'random_samples',  '-append')
 %% SNR
 current_snr = reshape(repmat(5:5:20,n_iter*region_number,1)',[],1); 
 save([ds_type '_sample_' dataset_name '.mat'],'current_snr', '-append')
@@ -136,66 +147,64 @@ save([ds_type '_sample_' dataset_name '.mat'],'current_snr', '-append')
 load('../anatomy/leadfield_75_20k.mat');
 %gt = load([ds_type '_sample_' dataset_name '.mat']);
 scale_ratio = [];
-point_05 = [40, 60];  % 45,35                                               % Magnitude falls to half of the centre region
-point_05 = randi(point_05);
-sigma = 0.8493*point_05;
-mag_change = [];
-not_empty_region=[];
+
 n_source = size(selected_region, 2);
-parfor i=1:size(selected_region, 1)%parfor
+for i=1:size(selected_region, 1)
     for k=1:n_source
         a = selected_region(i,k,:);
         a = a(:);
         a(a>1000) = [];
-        dis2centre = all_dis(a(1)+1,a+1);
-        mag_change(i,k,:) = [exp(-dis2centre.^2/(2*sigma^2)) NAN_NUMBER*ones(1,size(selected_region,3)-length(a))];
-        if train
-            scale_ratio(i,k,:) = find_alpha(a+1, random_samples(i, k), fwd, 10:2:20);  
-        else
-           % conti=1;
-           % while conti
-            for neibour_index=1:(length(a)+1)
-                neibour=a(neibour_index);
-                neibour_dir=['../source/nmm_region998_1/a' int2str(neibour) ];
-                neibour_length=length(dir(neibour_dir))-2;           
-                if neibour_length>random_samples(i, k)
-                    scale_ratio(i,k,:) = find_alpha(a, neibour_index, random_samples(i, k), fwd, [10,15]);
-                    not_empty_region(i,k)=a(neibour_index);
-                    break
+        if random_samples(i, k)>0
+            try
+		    if train
+			    scale_ratio(i,k,:) = find_alpha(a+1, random_samples(i, k), fwd, 10:2:20);
+		    else
+			    scale_ratio(i,k,:) = find_alpha(a+1, random_samples(i, k), fwd, [10,15]);
+            end
+            catch
+                dirList=dir(['../source/nmm_spikes/a' int2str(a(1))]);
+                nmm_number=length(dirList)-2;
+                if nmm_number>0
+                    if nper<nmm_number
+                        nmm_number=nper;
+                    end
+                    random_samples(i,k)=randi([1,nmm_number],1);
+        		    if train
+			            scale_ratio(i,k,:) = find_alpha(a+1, random_samples(i, k), fwd, 10:2:20);
+		            else
+			            scale_ratio(i,k,:) = find_alpha(a+1, random_samples(i, k), fwd, [10,15]);
+                    end
+                else
+                    random_samples(i,k)=0;
                 end
-            end      
-                % try
-                %     scale_ratio(i,k,:) = find_alpha(a+1, random_samples(i, k), fwd, [10,15]);
-                % catch
-                    % conti=1;
-          %      conti=0
-                % end
-          %  end
+            end
         end
     end
 end
-save([ds_type '_sample_' dataset_name '.mat'], 'scale_ratio', 'not_empty_region', '-append')
+nmm_idx = (selected_region(:,:,1)+1)*nper + random_samples + 1; 
+save([ds_type '_sample_' dataset_name '.mat'],'nmm_idx', 'random_samples',  '-append')
+save([ds_type '_sample_' dataset_name '.mat'], 'scale_ratio', '-append')
 %% Change Source Magnitude 
-% clear mag_change
-% point_05 = [40, 60];  % 45,35                                               % Magnitude falls to half of the centre region
-% point_05 = randi(point_05);
-% sigma = 0.8493*point_05;
-% mag_change = [];
-% for i=1:size(gt.selected_region,1)%parfor
-%     for k=1:n_sources
-%         try
-%         rg = gt.selected_region(i,k,:);
-%         rg(rg>1000) = [];
-%         dis2centre = all_dis(rg(1)+1,rg+1);
-%         mag_change(i,k,:) = [exp(-dis2centre.^2/(2*sigma^2)) NAN_NUMBER*ones(1,size(gt.selected_region,3)-length(rg))];
-%         catch
-%             aa=1;
-%         end
-%     end
-% end
+clear mag_change
+point_05 = [40, 60];  % 45,35                                               % Magnitude falls to half of the centre region
+point_05 = randi(point_05);
+sigma = 0.8493*point_05;
+mag_change = [];
+for i=1:size(selected_region,1)
+	for k=1:n_sources
+         try
+         rg = selected_region(i,k,:);
+         rg(rg>1000) = [];
+         dis2centre = raw_dis_matrix(rg(1)+1,rg+1);
+         mag_change(i,k,:) = [exp(-dis2centre.^2/(2*sigma^2)) NAN_NUMBER*ones(1,size(selected_region,3)-length(rg))];
+         catch
+             aa=1;
+         end
+     end
+ end
 save([ds_type '_sample_' dataset_name '.mat'], 'mag_change', '-append')
 %%
-function alpha = find_alpha(region_list, region_id, nmm_idx, fwd, target_SNR)
+function alpha = find_alpha(region_id, nmm_idx, fwd, target_SNR)
 % Re-scaling NMM channels in source channels
 %
 % INPUTS:
@@ -205,20 +214,12 @@ function alpha = find_alpha(region_list, region_id, nmm_idx, fwd, target_SNR)
 %     - target_SNR : set snr between signal and the background activity.
 % OUTPUTS:
 %     - alpha      : the scaling factor for one patch source
-% try
-new_id=region_list(region_id);
-load(['../source/nmm_region998_1/a' int2str(new_id) '/nmm_s0_' int2str(nmm_idx+1) '.mat'])
-% catch
-% aa=1;
-% end
-spike_shape = data(:,new_id+1)/max(data(:,new_id+1));
+
+load(['../source/nmm_spikes/a' int2str(region_id(1)-1) '/nmm_' int2str(nmm_idx) '.mat'])
+spike_shape = data(:,region_id(1))/max(data(:,region_id(1)));
 [~, peak_time] = max(spike_shape);
-data(:, region_list+1) = repmat(spike_shape,1,length(region_list+1));
-try
-[Ps, Pn, ~] = calcualate_SNR(data, fwd, region_list+1, max(peak_time-50,1):min(peak_time+50,500));
-catch
-    [Ps, Pn, ~] = calcualate_SNR(data, fwd, region_list+1, max(peak_time-50,0):min(peak_time+50,500));
-end
+data(:, region_id) = repmat(spike_shape,1,length(region_id));
+[Ps, Pn, ~] = calcualate_SNR(data, fwd, region_id, max(peak_time-50,1):min(peak_time+50,500));
 alpha = sqrt(10.^(target_SNR./10).*Pn./Ps);
 end
 
@@ -234,8 +235,8 @@ function [Ps, Pn, cur_snr] = calcualate_SNR(nmm, fwd, region_id, spike_ind)
 % OUTPUTS:
 %     - Ps         : signal power
 %     - Pn         : noise power
-%     - cur_snr    : current SNR in dB
-    
+%     - cur_snr    : current SNR in dB 
+
     sig_eeg = (fwd(:, region_id)*nmm(:, region_id)')';   % time * channel
     sig_eeg_rm = sig_eeg - mean(sig_eeg, 1);
     dd = 1:size(nmm,2);
@@ -256,7 +257,7 @@ function v = get_direction(a,b)
 % OUTPUTS:
 %     - v          : direction between two points; size 1*3
 v = b-a;
-v = v./norm(v,2);%v./mynorm(v,2); edited by ZRF
+v = v./mynorm(v,2);%v./mynorm(v,2); edited by ZRF
 end
 
 
@@ -319,4 +320,17 @@ function [add_rg, rm_rg] = smooth_region(nbs, current_regions)
             rm_rg = [rm_rg current_rg];
         end
     end
+end
+
+
+function nn = mynorm(x, varargin)
+% Calcualte norm over the rows/columns of a matrix
+% x: defalut, d*n, calculated the norm over each column
+% the second input is the dimension
+if nargin > 1
+    nn = sqrt(sum(x.^2,varargin{1}));
+else
+    nn = sqrt(sum(x.^2, 1));
+end
+
 end
