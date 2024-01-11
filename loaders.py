@@ -39,14 +39,14 @@ class SpikeEEGBuild(Dataset):
         size of the dataset, can be set as a small value during debugging
     """
 
-    def __init__(self, data_root, fwd, transform=None, args_params=None):
+    def __init__(self, data_root, fwd, nper, transform=None, args_params=None, data=None):
 
         # args_params: optional parameters; can be dataset_len
 
         self.file_path = data_root
         self.fwd = fwd
         self.transform = transform
-
+        self.nper=nper
         # self.data = []
         self.dataset_meta = loadmat(self.file_path)
         if 'dataset_len' in args_params and False:
@@ -58,27 +58,24 @@ class SpikeEEGBuild(Dataset):
         else:
             self.num_scale_ratio = self.dataset_meta['scale_ratio'].shape[2]
         # if not self.data:
-        self.region_not_empty=self.dataset_meta['not_empty_region']
-        path = "/home/zhongying/research/repo/DeepSIF-main/source/nmm_region998_1"
-        region_num = 994
-        self_data = []
-        for i in range(region_num):
-            self_data.append([])
-        for i in tqdm(range(region_num)):
-            nmm_list = os.listdir(os.path.join(path, 'a%d' % i))
-            if len(nmm_list) > 0:
-                for index, file in enumerate(nmm_list):
-                    if index > len(nmm_list):
-                        break
-                    mat = scio.loadmat(os.path.join(path, 'a%d' % i, file))['data']
-                    self_data[i].append(mat)
-        self.data=self_data
+        # self.region_not_empty=self.dataset_meta['not_empty_region']
+        self.path = "/home/zhongying/research/repo/DeepSIF-main/source/nmm_spikes"
+        #-------------------empty_area----------------
+
+        self.empty_index=np.where(self.dataset_meta['random_samples'] == 0)[0]
+        self.empty_index=np.unique(self.empty_index)
+        list_all=np.array([i for i in range(0,(self.dataset_meta['random_samples'].shape[0]))])
+        self.not_empty_index =np.delete(list_all,self.empty_index)
+
+        # self.data=data
         # self.data = torch.load(
         #     "/home/zhongying/research/repo/DeepSIF-main/Auxiliary script/self_data1.pt")  # h5py.File('{}_nmm.h5'.format(self.file_path[:-12]), 'r')['data']
 
     def __getitem__(self, index):
-
-        nper=2
+        if any(index==self.empty_index)==True:
+            index_origin=index
+            index=random.choice(self.not_empty_index)
+        nper=self.nper
         raw_lb = self.dataset_meta['selected_region'][index].astype(np.int)         # labels with padding
         lb = raw_lb[np.logical_not(ispadding(raw_lb))]                              # labels without padding
         raw_nmm = np.zeros((500, self.fwd.shape[1]))
@@ -92,13 +89,21 @@ class SpikeEEGBuild(Dataset):
             #         empty_lb.append(lb)
             # curr_lb=np.setdiff1d(curr_lb, empty_lb)
 
-            nmm_idx_orig=self.dataset_meta['nmm_idx'][index][kk]
-            region= self.dataset_meta['not_empty_region'][index][kk]      # region=(nmm_idx_orig-1)//nper-1
-            segment=(nmm_idx_orig-1)%nper
+            # nmm_idx_orig=self.dataset_meta['nmm_idx'][index][kk]
+            region= curr_lb[0]#self.dataset_meta['not_empty_region'][index][kk]      # region=(nmm_idx_orig-1)//nper-1
+            segment=self.dataset_meta['random_samples'][index][kk]
+            # nmm_number=os.listdir(os.path.join(self.path, 'a%d' % region))
+            # if segment<=nmm_number:
+            #     current_nmm = scio.loadmat(os.path.join(self.path, 'a%d' % region, "nmm_%d.mat" % (segment)))['data']
+            # else:
+            #     current_nmm = scio.loadmat(os.path.join(self.path, 'a%d' % region, "nmm_%d.mat"%(random.randint(1,nmm_number))))['data']
             try:
-                current_nmm = self.data[region][segment]
+                current_nmm = scio.loadmat(os.path.join(self.path, 'a%d' % region, "nmm_%d.mat" % (segment)))['data']
             except:
-                print('calei')
+                print("aa")
+                # current_nmm = self.data[region][segment]
+            # except:
+                # print('calei')
             # region=curr_lb[0]
             # neibour_index=0
             # seg_num=self.data[region].__len__()
@@ -273,8 +278,8 @@ class SpikeEEGBuildEval(Dataset):
 
     def __getitem__(self, index):
 
-        if not self.data:
-            self.data = h5py.File('{}_nmm.h5'.format(self.file_path[:-12]), 'r')['data']
+        # if not self.data:
+        #     self.data = h5py.File('{}_nmm.h5'.format(self.file_path[:-12]), 'r')['data']
 
         raw_lb = self.dataset_meta['selected_region'][index].astype(np.int)         # labels with padding
         lb = raw_lb[np.logical_not(ispadding(raw_lb))]                              # labels without padding
